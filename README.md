@@ -706,3 +706,394 @@ sedangkan source aplikasi tetap berada di:
 di host.
 
 Ini penting banget kalau ditanya saat ujian.
+
+---
+
+## 🛠️ TROUBLESHOOTING
+
+### 1. Container langsung mati
+
+Cek:
+```bash
+sudo docker ps -a
+```
+
+Lihat log:
+```bash
+sudo docker logs web-app
+```
+
+Kalau container berhenti karena command utama selesai, buat ulang dengan:
+```bash
+sudo docker rm -f web-app
+sudo docker run -d \
+  --name web-app \
+  -p 80:80 \
+  -v /var/mywww:/var/www/html \
+  ubuntu:24.04 \
+  tail -f /dev/null
+```
+
+---
+
+### 2. Apache tidak bisa start
+
+Cek status:
+```bash
+sudo docker exec web-app service apache2 status
+```
+
+Start:
+```bash
+sudo docker exec web-app service apache2 start
+```
+
+Cek konfigurasi:
+```bash
+sudo docker exec web-app apache2ctl configtest
+```
+
+Kalau:
+```text
+Syntax OK
+```
+berarti konfigurasi Apache valid.
+
+Cek proses:
+```bash
+sudo docker exec web-app ps aux | grep apache2
+```
+
+---
+
+### 3. Browser Can't be reached
+
+Pertama cek container:
+```bash
+sudo docker ps
+```
+
+Harus ada:
+```text
+0.0.0.0:80->80/tcp
+```
+
+Cek port host:
+```bash
+sudo ss -ltnp | grep ':80'
+```
+
+Harus ada:
+```text
+0.0.0.0:80
+```
+
+Tes dari EC2-WEB:
+```bash
+curl -I http://127.0.0.1
+```
+
+Kalau:
+```text
+HTTP/1.1 200 OK
+```
+berarti Docker + Apache sudah menerima request.
+
+**Cek UFW:**
+```bash
+sudo ufw status
+```
+
+Kalau aktif:
+```bash
+sudo ufw allow 80/tcp
+```
+
+**Cek Security Group:**
+
+EC2-WEB harus punya:
+* HTTP
+* TCP
+* 80
+* 0.0.0.0/0
+
+Akses browser menggunakan:
+```text
+http://PUBLIC-IP-EC2-WEB
+```
+
+Bukan:
+```text
+https://PUBLIC-IP-EC2-WEB
+```
+kecuali HTTPS memang sudah dikonfigurasi.
+
+---
+
+### 4. curl di dalam container tidak ditemukan
+
+Kalau:
+```bash
+sudo docker exec web-app curl http://localhost
+```
+
+menghasilkan:
+```text
+exec: "curl": executable file not found
+```
+berarti curl belum terinstall.
+
+Install:
+```bash
+sudo docker exec -it web-app bash
+```
+
+Kemudian:
+```bash
+apt update
+apt install -y curl
+```
+
+Lalu:
+```bash
+curl http://localhost
+```
+
+---
+
+### 5. Database tidak bisa terkoneksi
+
+Tes dari EC2-WEB:
+```bash
+nc -zv PRIVATE-IP-EC2-DB 3306
+```
+
+Contoh:
+```bash
+nc -zv 172.31.3.163 3306
+```
+
+Kalau berhasil:
+```text
+succeeded
+```
+berarti port DB bisa diakses.
+
+Cek container DB:
+```bash
+sudo docker ps
+```
+
+Masuk MariaDB:
+```bash
+sudo docker exec -it database-db mariadb -u root -prootpass
+```
+
+Cek database:
+```sql
+SHOW DATABASES;
+```
+
+Pastikan:
+```text
+db_reservasi_ruangan
+```
+
+---
+
+### 6. Error php_network_getaddresses
+
+Contoh:
+```text
+php_network_getaddresses:
+getaddrinfo for 172.31.3.163 failed
+```
+
+Cek `DB_HOST`.
+
+Edit:
+```bash
+sudo nano /var/mywww/config/database.php
+```
+
+Harus:
+```php
+$DB_HOST = '172.31.3.163';
+$DB_NAME = 'db_reservasi_ruangan';
+$DB_USER = 'root';
+$DB_PASS = 'rootpass';
+```
+
+⚠️ Perhatikan jangan ada spasi:
+
+Salah:
+```php
+$DB_HOST = '172.31.3.163 ';
+```
+
+Benar:
+```php
+$DB_HOST = '172.31.3.163';
+```
+
+---
+
+### 7. Tes koneksi database menggunakan PHP
+
+```bash
+sudo docker exec web-app php -r '$pdo = new PDO("mysql:host=172.31.3.163;dbname=db_reservasi_ruangan;charset=utf8mb4","root","rootpass"); echo "DB OK\n";'
+```
+
+Kalau:
+```text
+DB OK
+```
+
+berarti:
+```text
+PHP → DB
+```
+sudah berhasil.
+
+---
+
+### 8. Tes file PHP
+
+```bash
+sudo docker exec web-app php -f /var/www/html/index.php
+```
+
+Kalau muncul error PHP/database, berarti masalah ada pada aplikasi atau konfigurasi.
+
+Cek file:
+```bash
+sudo docker exec web-app ls -lah /var/www/html
+```
+
+---
+
+### 9. Apache Could not reliably determine the server's fully qualified domain name
+
+Contoh:
+```text
+AH00558: apache2:
+Could not reliably determine the server's fully qualified domain name
+```
+
+Ini biasanya warning, bukan error.
+
+Apache tetap dapat berjalan.
+
+Kalau ingin menghilangkan warning:
+```bash
+sudo docker exec web-app bash -c "echo 'ServerName localhost' >> /etc/apache2/apache2.conf"
+```
+
+Kemudian:
+```bash
+sudo docker exec web-app apache2ctl configtest
+```
+
+Harus:
+```text
+Syntax OK
+```
+
+---
+
+### 10. Port 80 sudah dipakai
+
+Cek:
+```bash
+sudo ss -ltnp | grep ':80'
+```
+
+Kalau port 80 sudah dipakai service lain, cek:
+```bash
+sudo lsof -i :80
+```
+
+Bisa menggunakan port lain, misalnya:
+```bash
+sudo docker run -d \
+  --name web-app \
+  -p 8080:80 \
+  -v /var/mywww:/var/www/html \
+  ubuntu:24.04 \
+  tail -f /dev/null
+```
+
+Kemudian Security Group harus membuka:
+```text
+TCP 8080
+```
+
+Akses:
+```text
+http://PUBLIC-IP-EC2-WEB:8080
+```
+
+---
+
+### 11. Container tidak bisa di-exec
+
+Kalau:
+```bash
+sudo docker exec -it db-reservasi bash
+```
+
+menghasilkan:
+```text
+No such container
+```
+
+Cek nama container:
+```bash
+sudo docker ps -a
+```
+
+Contoh kalau namanya:
+```text
+database-db
+```
+
+maka:
+```bash
+sudo docker exec -it database-db bash
+```
+
+---
+
+### 12. File aplikasi tidak muncul di container
+
+Cek host:
+```bash
+ls -lah /var/mywww
+```
+
+Cek container:
+```bash
+sudo docker exec web-app ls -lah /var/www/html
+```
+
+Harus menunjukkan file yang sama.
+
+Pastikan saat membuat container menggunakan:
+```text
+-v /var/mywww:/var/www/html
+```
+
+---
+
+### 13. Cek log Apache
+
+```bash
+sudo docker exec web-app tail -n 50 /var/log/apache2/error.log
+```
+
+Access log:
+```bash
+sudo docker exec web-app tail -n 50 /var/log/apache2/access.log
+```
+
+Ini berguna kalau browser menghasilkan error tetapi belum jelas penyebabnya.
