@@ -138,6 +138,8 @@ sudo docker run -d \
   mariadb:jammy
 ```
 
+> ⏳ **Tips:** Tunggu sekitar 10–15 detik setelah container dibuat agar MariaDB menyelesaikan inisialisasi awal database sebelum menjalankan perintah exec/login.
+
 Cek:
 ```bash
 sudo docker ps
@@ -179,53 +181,17 @@ exit
 
 ---
 
-## 7. Download Aplikasi di EC2-DB
+## 7. Konsep Database Aplikasi
 
-Install Git:
-```bash
-sudo apt update
-sudo apt install -y git
-```
-
-Clone:
-```bash
-git clone https://github.com/paknux/apptoko.git
-```
-
-Masuk:
-```bash
-cd apptoko
-```
-
-Cek:
-```bash
-ls -lah
-```
-
-Harus ada:
-```text
-barang.php
-config.php
-dashboard.php
-includes/
-index.php
-kategori.php
-laporan.php
-login.php
-logout.php
-pos.php
-struk.php
-users.php
-```
+Aplikasi **apptoko** berbeda dengan aplikasi PHP konvensional yang memerlukan import file `.sql` secara manual.
+* Struktur tabel (`users`, `kategori`, `barang`, `penjualan`, `penjualan_detail`) dan akun demo bawaan (`admin`, `kasir`, `gudang`) akan **dibuat otomatis** oleh skrip PHP saat website pertama kali diakses.
+* Kita **tidak perlu** mengunduh/clone source code di EC2-DB. Source code web hanya diperlukan di EC2-WEB.
 
 ---
 
-## 8. Setup Database
+## 8. Setup & Verifikasi Database di EC2-DB
 
-> **Catatan Penting:**  
-> Aplikasi **apptoko** tidak memerlukan import file SQL manual. Database `toko_db`, struktur tabel (`users`, `kategori`, `barang`, `penjualan`, `penjualan_detail`), dan akun demo akan **dibuat otomatis** saat aplikasi pertama kali diakses lewat browser.
-
-Namun untuk memastikan atau menyiapkan database terlebih dahulu di MariaDB:
+Untuk memastikan database siap dan dapat diakses sejak awal oleh web server:
 
 Buat database `toko_db` di container:
 ```bash
@@ -234,7 +200,7 @@ mariadb -u root -prootpass \
 -e "CREATE DATABASE IF NOT EXISTS toko_db; SHOW DATABASES;"
 ```
 
-Database aplikasi harus ada:
+Database aplikasi harus muncul:
 ```text
 toko_db
 ```
@@ -323,6 +289,14 @@ index.php
 kategori.php
 ...
 ```
+
+Buat dan atur izin folder upload foto barang:
+```bash
+sudo mkdir -p /var/mywww/uploads
+sudo chmod -R 777 /var/mywww/uploads
+```
+
+> **Catatan:** Folder `uploads/` diberi izin tulis agar saat kasir/admin mengupload gambar produk tidak terjadi error *Permission denied*.
 
 ---
 
@@ -467,22 +441,23 @@ root@xxxx:/#
 
 ---
 
-## 18. Install Apache + PHP
+## 18. Install Apache + PHP + curl
 
 Di dalam container:
 ```bash
 apt update
 ```
 
-Install:
+Install paket yang dibutuhkan (gunakan `DEBIAN_FRONTEND=noninteractive` agar tidak muncul dialog timezone):
 ```bash
-apt install -y apache2 php libapache2-mod-php php-mysql
+DEBIAN_FRONTEND=noninteractive apt install -y apache2 php libapache2-mod-php php-mysql curl
 ```
 
 Yang kita butuhkan:
-* Apache
-* PHP
-* PHP MySQL/PDO
+* Apache (web server)
+* PHP (runtime aplikasi)
+* PHP MySQL / mysqli (driver koneksi database)
+* curl (alat pengujian website via terminal)
 
 Cek PHP:
 ```bash
@@ -496,10 +471,19 @@ apache2 -v
 
 ---
 
-## 19. Cek Source Code
+## 19. Cek Source Code & Hapus index.html Bawaan Apache
 
 Karena `/var/mywww` di-bind mount ke `/var/www/html`, source code otomatis terlihat di container.
 
+> ⚠️ **PENTING (Jebakan Ujian):**  
+> Saat Apache diinstall, sistem otomatis membuat file default `/var/www/html/index.html`. Hapus file ini agar Apache membaca `index.php` aplikasi toko, bukan menampilkan halaman default *"Apache2 Ubuntu Default Page"*.
+
+Hapus file default Apache:
+```bash
+rm -f /var/www/html/index.html
+```
+
+Cek file aplikasi:
 ```bash
 ls -lah /var/www/html
 ```
@@ -550,21 +534,23 @@ Kalau HTML aplikasi keluar berarti Apache berhasil melayani aplikasi.
 
 ## 22. Tes Database dari PHP
 
-Ini salah satu tes paling penting.
+Ini salah satu tes paling penting untuk memastikan PHP di EC2-WEB bisa menghubungi MariaDB di EC2-DB.
 
 Masih di container:
+
+Tes koneksi dasar ke server database:
 ```bash
-php -r '$c = new mysqli("172.31.3.163", "root", "rootpass", "toko_db"); echo $c->connect_error ? "FAIL: ".$c->connect_error."\n" : "DB CONNECTED\n";'
+php -r '$c = new mysqli("172.31.3.163", "root", "rootpass"); echo $c->connect_error ? "FAIL: ".$c->connect_error."\n" : "DB SERVER CONNECTED\n";'
 ```
 
-Atau menggunakan PDO:
+Dan tes koneksi ke database `toko_db`:
 ```bash
-php -r '$pdo = new PDO("mysql:host=172.31.3.163;dbname=toko_db", "root", "rootpass"); echo "DB CONNECTED\n";'
+php -r '$c = new mysqli("172.31.3.163", "root", "rootpass", "toko_db"); echo $c->connect_error ? "FAIL: ".$c->connect_error."\n" : "DATABASE toko_db OK\n";'
 ```
 
 Kalau keluar:
 ```text
-DB CONNECTED
+DATABASE toko_db OK
 ```
 
 berarti:
@@ -1117,3 +1103,36 @@ sudo docker exec web-app tail -n 50 /var/log/apache2/access.log
 ```
 
 Ini berguna kalau browser menghasilkan error tetapi belum jelas penyebabnya.
+
+---
+
+### 14. Halaman yang Muncul "Apache2 Ubuntu Default Page (It Works!)"
+
+* **Penyebab:** File default `index.html` belum dihapus sehingga Apache mendahulukan `index.html` dibanding `index.php`.
+* **Solusi:**
+  ```bash
+  sudo docker exec web-app rm -f /var/www/html/index.html
+  ```
+  Kemudian refresh browser (Ctrl + F5).
+
+---
+
+### 15. Upload Foto Produk Error / Permission Denied
+
+* **Penyebab:** User `www-data` milik Apache tidak memiliki hak tulis ke folder `uploads/`.
+* **Solusi:**
+  Di host EC2-WEB:
+  ```bash
+  sudo chmod -R 777 /var/mywww/uploads
+  ```
+
+---
+
+### 16. Apache Mati Setelah Container Stop / EC2 Reboot
+
+* **Penyebab:** Container dijalankan dengan command `tail -f /dev/null`, sehingga service Apache tidak otomatis start saat container menyala kembali.
+* **Solusi:**
+  Jalankan Apache kembali:
+  ```bash
+  sudo docker exec web-app service apache2 start
+  ```
