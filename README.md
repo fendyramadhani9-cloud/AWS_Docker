@@ -37,7 +37,7 @@
 ```
 
 **Aplikasi yang dipakai:**  
-https://github.com/paknux/app-reservasi.git
+https://github.com/paknux/apptoko.git
 
 ---
 
@@ -189,12 +189,12 @@ sudo apt install -y git
 
 Clone:
 ```bash
-git clone https://github.com/paknux/app-reservasi.git
+git clone https://github.com/paknux/apptoko.git
 ```
 
 Masuk:
 ```bash
-cd app-reservasi
+cd apptoko
 ```
 
 Cek:
@@ -204,44 +204,44 @@ ls -lah
 
 Harus ada:
 ```text
-ajax/
-bookings.php
-config/
+barang.php
+config.php
+dashboard.php
 includes/
 index.php
-reservasi_ruangan.sql
-rooms.php
+kategori.php
+laporan.php
+login.php
+logout.php
+pos.php
+struk.php
+users.php
 ```
 
 ---
 
-## 8. Import Database
+## 8. Setup Database
 
-File database:
-```text
-reservasi_ruangan.sql
-```
+> **Catatan Penting:**  
+> Aplikasi **apptoko** tidak memerlukan import file SQL manual. Database `toko_db`, struktur tabel (`users`, `kategori`, `barang`, `penjualan`, `penjualan_detail`), dan akun demo akan **dibuat otomatis** saat aplikasi pertama kali diakses lewat browser.
 
-Import langsung ke container:
-```bash
-sudo docker exec -i database-db mariadb -u root -prootpass < reservasi_ruangan.sql
-```
+Namun untuk memastikan atau menyiapkan database terlebih dahulu di MariaDB:
 
-Cek:
+Buat database `toko_db` di container:
 ```bash
 sudo docker exec -it database-db \
 mariadb -u root -prootpass \
--e "SHOW DATABASES;"
+-e "CREATE DATABASE IF NOT EXISTS toko_db; SHOW DATABASES;"
 ```
 
 Database aplikasi harus ada:
 ```text
-db_reservasi_ruangan
+toko_db
 ```
 
 Jadi DB_NAME yang benar:
 ```text
-db_reservasi_ruangan
+toko_db
 ```
 
 ---
@@ -303,7 +303,7 @@ cd /var/mywww
 
 Clone:
 ```bash
-sudo git clone https://github.com/paknux/app-reservasi.git .
+sudo git clone https://github.com/paknux/apptoko.git .
 ```
 
 *(Perhatikan titik `.` di belakang)*
@@ -315,10 +315,12 @@ ls -lah
 
 Harus ada:
 ```text
-index.php
-config/
+barang.php
+config.php
+dashboard.php
 includes/
-ajax/
+index.php
+kategori.php
 ...
 ```
 
@@ -328,20 +330,22 @@ ajax/
 
 File konfigurasi aplikasi:
 ```text
-/var/mywww/config/database.php
+/var/mywww/config.php
 ```
+
+*(Perhatikan: file berada langsung di root `/var/mywww/config.php`, bukan di dalam subfolder)*
 
 Edit:
 ```bash
-sudo nano /var/mywww/config/database.php
+sudo nano /var/mywww/config.php
 ```
 
 Isi bagian database menjadi:
 ```php
-$DB_HOST = '172.31.3.163';
-$DB_NAME = 'db_reservasi_ruangan';
-$DB_USER = 'root';
-$DB_PASS = 'rootpass';
+define('DB_HOST', '172.31.3.163');
+define('DB_USER', 'root');
+define('DB_PASS', 'rootpass');
+define('DB_NAME', 'toko_db');
 ```
 
 Catatan:
@@ -358,7 +362,7 @@ localhost
 karena MariaDB berada di EC2 lain.
 
 Dan:
-* `DB_NAME = db_reservasi_ruangan`
+* `DB_NAME = toko_db`
 * `DB_USER = root`
 * `DB_PASS = rootpass`
 
@@ -502,12 +506,16 @@ ls -lah /var/www/html
 
 Harus ada:
 ```text
-index.php
-bookings.php
-rooms.php
-config/
+barang.php
+config.php
+dashboard.php
 includes/
-ajax/
+index.php
+kategori.php
+laporan.php
+login.php
+pos.php
+users.php
 ```
 
 ---
@@ -546,7 +554,12 @@ Ini salah satu tes paling penting.
 
 Masih di container:
 ```bash
-php -r '$pdo = new PDO("mysql:host=172.31.3.163;dbname=db_reservasi_ruangan", "root", "rootpass"); echo "DB CONNECTED\n";'
+php -r '$c = new mysqli("172.31.3.163", "root", "rootpass", "toko_db"); echo $c->connect_error ? "FAIL: ".$c->connect_error."\n" : "DB CONNECTED\n";'
+```
+
+Atau menggunakan PDO:
+```bash
+php -r '$pdo = new PDO("mysql:host=172.31.3.163;dbname=toko_db", "root", "rootpass"); echo "DB CONNECTED\n";'
 ```
 
 Kalau keluar:
@@ -558,7 +571,7 @@ berarti:
 ```text
 PHP
  │
- │ PDO
+ │ MySQL / PDO
  ▼
 MariaDB
  │
@@ -586,7 +599,14 @@ Buka:
 http://PUBLIC-IP-EC2-WEB
 ```
 
-Kalau semuanya benar, aplikasi reservasi muncul.
+Kalau semuanya benar, aplikasi **Toko Sederhana** muncul dan siap digunakan.
+
+**Akun Demo Bawaan:**
+| Username | Password | Role |
+| :--- | :--- | :--- |
+| `admin` | `123` | Admin |
+| `kasir` | `123` | Kasir |
+| `gudang` | `123` | Gudang |
 
 ---
 
@@ -896,7 +916,7 @@ SHOW DATABASES;
 
 Pastikan:
 ```text
-db_reservasi_ruangan
+toko_db
 ```
 
 ---
@@ -913,27 +933,27 @@ Cek `DB_HOST`.
 
 Edit:
 ```bash
-sudo nano /var/mywww/config/database.php
+sudo nano /var/mywww/config.php
 ```
 
 Harus:
 ```php
-$DB_HOST = '172.31.3.163';
-$DB_NAME = 'db_reservasi_ruangan';
-$DB_USER = 'root';
-$DB_PASS = 'rootpass';
+define('DB_HOST', '172.31.3.163');
+define('DB_USER', 'root');
+define('DB_PASS', 'rootpass');
+define('DB_NAME', 'toko_db');
 ```
 
 ⚠️ Perhatikan jangan ada spasi:
 
 Salah:
 ```php
-$DB_HOST = '172.31.3.163 ';
+define('DB_HOST', '172.31.3.163 ');
 ```
 
 Benar:
 ```php
-$DB_HOST = '172.31.3.163';
+define('DB_HOST', '172.31.3.163');
 ```
 
 ---
@@ -941,7 +961,7 @@ $DB_HOST = '172.31.3.163';
 ### 7. Tes koneksi database menggunakan PHP
 
 ```bash
-sudo docker exec web-app php -r '$pdo = new PDO("mysql:host=172.31.3.163;dbname=db_reservasi_ruangan;charset=utf8mb4","root","rootpass"); echo "DB OK\n";'
+sudo docker exec web-app php -r '$c = new mysqli("172.31.3.163", "root", "rootpass", "toko_db"); echo $c->connect_error ? "FAIL" : "DB OK\n";'
 ```
 
 Kalau:
@@ -1039,7 +1059,7 @@ http://PUBLIC-IP-EC2-WEB:8080
 
 Kalau:
 ```bash
-sudo docker exec -it db-reservasi bash
+sudo docker exec -it database-db-salah bash
 ```
 
 menghasilkan:
